@@ -1,0 +1,3 @@
+Server started successfully
+Python server running
+Error detected

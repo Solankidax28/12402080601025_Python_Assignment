@@ -1,0 +1,3 @@
+Python server started
+Python application running
+Error in application
