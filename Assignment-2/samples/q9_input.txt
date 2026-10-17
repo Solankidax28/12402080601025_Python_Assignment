@@ -1,0 +1,6 @@
+inventory_A.txt
+inventory_B.txt
+3
+MERGE
+COMPARE
+ADD A P2 Gel Pen 20 3 6
