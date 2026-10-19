@@ -31,64 +31,151 @@ def create_tables(connection):
 def import_students(connection, file_path):
     cursor = connection.cursor()
 
-    with open(file_path, "r", newline="", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
+    try:
+        with open(file_path, "r", newline="", encoding="utf-8-sig") as file:
+            reader = csv.DictReader(file)
 
-        for row in reader:
-            cursor.execute("""
-                INSERT INTO Student (student_id, name, SPI)
-                VALUES (%s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    name = VALUES(name),
-                    SPI = VALUES(SPI)
-            """, (
-                int(row["student_id"]),
-                row["name"],
-                float(row["SPI"])
-            ))
+            if reader.fieldnames is None:
+                raise ValueError("Student CSV file is empty.")
 
-    connection.commit()
-    cursor.close()
+            reader.fieldnames = [
+                field.strip() for field in reader.fieldnames
+            ]
+
+            required = {"student_id", "name", "SPI"}
+            missing = required - set(reader.fieldnames)
+
+            if missing:
+                raise ValueError(
+                    f"Student CSV missing columns: {sorted(missing)}. "
+                    f"Found: {reader.fieldnames}"
+                )
+
+            for line_number, row in enumerate(reader, start=2):
+                row = {
+                    key.strip(): value.strip() if value else value
+                    for key, value in row.items()
+                    if key is not None
+                }
+
+                try:
+                    student_id = int(row["student_id"])
+                    name = row["name"]
+                    spi = float(row["SPI"])
+                except (ValueError, TypeError) as error:
+                    raise ValueError(
+                        f"Invalid student data at CSV line {line_number}: "
+                        f"{row}"
+                    ) from error
+
+                if not 0 <= spi <= 10:
+                    raise ValueError(
+                        f"SPI must be between 0 and 10 at line "
+                        f"{line_number}."
+                    )
+
+                cursor.execute("""
+                    INSERT INTO Student (student_id, name, SPI)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name),
+                        SPI = VALUES(SPI)
+                """, (student_id, name, spi))
+
+        connection.commit()
+        print("Student data imported successfully.")
+
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
 
 
 def import_registrations(connection, file_path):
     cursor = connection.cursor()
 
-    with open(file_path, "r", newline="", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
+    try:
+        with open(file_path, "r", newline="", encoding="utf-8-sig") as file:
+            reader = csv.DictReader(file)
 
-        for row in reader:
-            cursor.execute("""
-                INSERT IGNORE INTO CourseRegistration
-                (student_id, course_id)
-                VALUES (%s, %s)
-            """, (
-                int(row["student_id"]),
-                row["course_id"]
-            ))
+            if reader.fieldnames is None:
+                raise ValueError("Registration CSV file is empty.")
 
-    connection.commit()
-    cursor.close()
+            reader.fieldnames = [
+                field.strip() for field in reader.fieldnames
+            ]
+
+            required = {"student_id", "course_id"}
+            missing = required - set(reader.fieldnames)
+
+            if missing:
+                raise ValueError(
+                    f"Registration CSV missing columns: {sorted(missing)}. "
+                    f"Found: {reader.fieldnames}"
+                )
+
+            for line_number, row in enumerate(reader, start=2):
+                row = {
+                    key.strip(): value.strip() if value else value
+                    for key, value in row.items()
+                    if key is not None
+                }
+
+                try:
+                    student_id = int(row["student_id"])
+                    course_id = row["course_id"]
+
+                    cursor.execute("""
+                        INSERT IGNORE INTO CourseRegistration
+                        (student_id, course_id)
+                        VALUES (%s, %s)
+                    """, (student_id, course_id))
+
+                except (ValueError, TypeError) as error:
+                    raise ValueError(
+                        f"Invalid registration data at CSV line "
+                        f"{line_number}: {row}"
+                    ) from error
+
+        connection.commit()
+        print("Registration data imported successfully.")
+
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
 
 
 def display_students(connection, course_id, threshold):
     cursor = connection.cursor()
 
-    query = """
-        SELECT s.student_id, s.name, s.SPI, cr.course_id
-        FROM Student s
-        JOIN CourseRegistration cr
-            ON s.student_id = cr.student_id
-        WHERE cr.course_id = %s AND s.SPI > %s
-        ORDER BY s.SPI DESC, s.student_id ASC
-    """
+    try:
+        query = """
+            SELECT s.student_id, s.name, s.SPI, cr.course_id
+            FROM Student s
+            JOIN CourseRegistration cr
+                ON s.student_id = cr.student_id
+            WHERE cr.course_id = %s AND s.SPI > %s
+            ORDER BY s.SPI DESC, s.student_id ASC
+        """
 
-    cursor.execute(query, (course_id, threshold))
+        cursor.execute(query, (course_id, threshold))
+        students = cursor.fetchall()
 
-    for student_id, name, spi, course in cursor.fetchall():
-        print(student_id, name, spi, course)
+        if not students:
+            print("No students found matching the criteria.")
+            return
 
-    cursor.close()
+        print("\nStudents matching the criteria:")
+        print("-" * 45)
+
+        for student_id, name, spi, course in students:
+            print(student_id, name, spi, course)
+
+    finally:
+        cursor.close()
 
 
 def main():
@@ -131,8 +218,10 @@ def main():
 
     except Error as error:
         print("MySQL error:", error)
-    except (OSError, ValueError, KeyError) as error:
+
+    except (OSError, ValueError, KeyError, csv.Error) as error:
         print("Input or file error:", error)
+
     finally:
         if connection is not None and connection.is_connected():
             connection.close()
